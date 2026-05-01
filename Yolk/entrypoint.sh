@@ -389,6 +389,7 @@ run_sbox() {
     local resolved_server_name="${SERVER_NAME}"
     local cli_has_game_flag=0
     local cli_arg=""
+    local server_status=0
 
     if [ ! -f "${SBOX_SERVER_EXE}" ]; then
         log_error "${SBOX_SERVER_EXE} was not found. Cannot start S&Box server."
@@ -488,14 +489,23 @@ run_sbox() {
     else
         log_info "Starting S&Box server in Steam relay mode"
     fi
+    log_info "Wine runtime: $(wine --version 2>/dev/null || echo unavailable)"
     log_info "Command: wine \"${SBOX_SERVER_EXE}\" ${redacted_args[*]}"
 
     cd "${SBOX_INSTALL_DIR}"
-    # Run server in foreground so Pterodactyl can track the main process.
-    # Tee stdout to `${LOG_FILE}` and stderr to `${ERROR_LOG}` while preserving console output.
-    exec env "${launch_env[@]}" wine "${SBOX_SERVER_EXE}" "${args[@]}" \
-        > >(tee -a "${LOG_FILE}") \
-        2> >(tee -a "${ERROR_LOG}" >&2)
+    # Keep the game process in foreground and mirror all output to panel + log file.
+    # This ensures startup crashes still leave visible context in Pterodactyl console.
+    set +e
+    env "${launch_env[@]}" wine "${SBOX_SERVER_EXE}" "${args[@]}" 2>&1 | tee -a "${LOG_FILE}"
+    server_status=${PIPESTATUS[0]}
+    set -e
+
+    if [ "${server_status}" -ne 0 ]; then
+        log_error "sbox-server exited with status ${server_status}"
+        log_error "startup failed after launch command; inspect recent Wine output above for root cause"
+    fi
+
+    exit "${server_status}"
 }
 
 # ============================================================================
